@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+#show the HBA cards used, the chassis size, if the chassis is a hybrid or not,
+#if CAS is used or not, the lvm volumes
+
+import subprocess
+import re
+DEVICE_PATH="/dev"
+CONFIG_PATH="/etc"
+
+hbas = [ 
+"3224",
+"3316",
+"3616",
+"3008"
+]
+
+def getHba():
+    hbaCards = []
+    allPcis = subprocess.Popen(["lspci"], universal_newlines=True, stdout=subprocess.PIPE).stdout
+    for line in allPcis:
+        for card in hbas:
+            regex = re.search("({c})".format(c=card), line)
+            if regex != None:
+                hbaCards.append(regex.group(0))
+                
+    return hbaCards
+    
+ def getChassis(hbaCards):
+    switch(len(hbaCards)){
+        case 0: 
+            subprocess.run(["echo", "No Supported HBA Detected"])
+            break
+        case 1:
+            chassisSize = 15
+            break
+        case 2:
+            chassisSize = 30
+            break
+        case 3:    
+            chassisSize = 45
+            break
+        case 4:
+            chassisSize = 60
+            break
+        default:
+            subprocess.run(["echo", "No Supported HBA Detected"])
+            break
+    }
+        
+    return chassisSize
+    
+def main():
+    hbaCards=getHba()
+    chassisSize=getChassis()
+    print(hbaCards)
+    print(chassisSize)
+
+if __name__ == "__main__":
+    main()
