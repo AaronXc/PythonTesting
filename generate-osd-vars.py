@@ -5,7 +5,7 @@ import subprocess
 subprocess.run(['ls', "etc"])
 someString = input("enter some text to look for")
 if subprocess.run(["ls", "/etc", "|", "grep", "someString", "|", "wc", "-l" ]):
-    count = subprocess.run(["cat", "/etc", "|", "grep", "someString", "|", "wc", "-l" ]):
+    count = subprocess.run(["cat", "/etc", "|", "grep", "someString", "|", "wc", "-l" ])
     print("succesfully found %2.1i instances of that string"% (count))
     
 else:
