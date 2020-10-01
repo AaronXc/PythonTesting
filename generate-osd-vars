@@ -25,35 +25,58 @@ def getHba():
                 
     return hbaCards
     
- def getChassis(hbaCards):
-    switch(len(hbaCards)){
-        case 0: 
-            subprocess.run(["echo", "No Supported HBA Detected"])
-            break
-        case 1:
-            chassisSize = 15
-            break
-        case 2:
-            chassisSize = 30
-            break
-        case 3:    
-            chassisSize = 45
-            break
-        case 4:
-            chassisSize = 60
-            break
-        default:
-            subprocess.run(["echo", "No Supported HBA Detected"])
-            break
-    }
-        
+def getChassis(hbaCards):
+    hbaQuantity = len(hbaCards)
+    if hbaQuantity == 0:
+        return "No Supported HBA Detected"
+    else:
+        switch = { 
+        1: "15",
+        2: "30",
+        3: "45",
+        4: "60"
+        }
+        if (hbaQuantity == 1 or hbaQuantity == 2 or hbaQuantity == 3 or hbaQuantity == 4):
+            chassisSize = switch.get(hbaQuantity)
+        else:
+            chassisSize = "No Supported HBA Detected"
     return chassisSize
+    
+def checkCas():
+    if subprocess.run(["rpm", "-q", "open-cas-linux"], stdout=subprocess.PIPE, universal_newlines=True).returncode == 0:
+        if subprocess.run(["casadm", "-L"], stdout=subprocess.PIPE, universal_newlines=True).stdout == "No chaches running":
+            CAS=False
+        else:
+            CAS = True
+    else:
+        CAS=False
+    return CAS
+    
+def getDrives(CAS):
+    theBays=[]
+     bays=subprocess.Popen(["cat", "/etc/vdev_id.conf"], stdout=subprocess.PIPE, universal_newlines=True).stdout
+     for line in bays:
+        regex = re.search("^alias\s(\S+)\s", line)
+        if regex != None:
+            bay = re.search("\s(\S)\s", regex)
+            if bay != None:
+                print(bay.group(0))
+                if CAS == True:
+                    bayPath = DEVICE_PATH+"/"+bay
+                    var1 = subprocess.Popen(["casadm", "-L", "-o", "csv"], stdout=subprocess.PIPE, universal_newlines=True).stdout
+                    var2 = subprocess.run(["readlink", bayPath], stdout=subprocess.PIPE, universal_newlines=True).stdout
+                    casType = subprocess.Popen(["cut", "-d", "-f", "1"], stdout=subprocess.PIPE, universal_newlines=True).stdout
+                    if casType == "core":
+                        theBay.append(
     
 def main():
     hbaCards=getHba()
-    chassisSize=getChassis()
+    chassisSize=getChassis(hbaCards)
+    CAS=checkCas()
+    getDrives()
+    print(CAS)
     print(hbaCards)
     print(chassisSize)
 
 if __name__ == "__main__":
-    main()
+    main() 
