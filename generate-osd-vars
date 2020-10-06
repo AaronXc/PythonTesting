@@ -1,30 +1,80 @@
 #!/usr/bin/env python3
 #show the HBA cards used, the chassis size, if the chassis is a hybrid or not,
-#if CAS is used or not, the lvm volumes
+#if CAS is used or not, the devices used, and which devices are cores
+"""
+logic for generate-osd-vars:
+
+1) use vdev_id.conf to get all of the symbolic links and then read the links (readlink) the devices they point to (call this LIST_A). If there is no device, do not add anything
+	to the list.
+
+2) use casadm -L commmand to get all of the devices that are either cores or caches, and the "cas1-1" or "cas2-2" that corresponds (call this LIST_B and LIST_C)
+
+3[OUTER_LOOP]) check, for each entry in LIST_A:
+
+	3a[INNER_LOOP]) Check for core and cache devices:
+        if there is a match in LIST_B or LIST_C based on the device name, append a tuple containing the symbolic link 
+		and the device name, in that order, to a new list (call this new list LIST_D). Do not append any devices that are running a cache to the list
+	
+	3b) Append those devices that are neither core nor cache:
+        if there was no match in part 3a, append the symbolic link and the device name from LIST_A to LIST_D. 
+		Knowing whether or not there was a match in 3a requires two "flags", one from each comparison that occurred when checking for a core or cache device.
+
+	3c) clear all flags that were set. BREAK 3a[OUTER_LOOP].
+	
+4) return LIST_C
+"""
+
+###################################################################################################################################################################################
 
 import subprocess
 import re
-DEVICE_PATH="/dev"
-CONFIG_PATH="/etc"
+import os
 
-hbas = [ 
-"3224",
-"3316",
-"3616",
-"3008"
-]
-
-def getHba():
+###################################################################################################################################################################################
+#   get_path_variables()
+# ARGS: none
+# DESC: get the path variables needed for all other functions
+###################################################################################################################################################################################
+def get_path_variables():
+    # get the alias config path, if it fails, assume /etc
+    # get the device path, if it fails, assume /dev
+    
+    conf_path = os.getenv('ALIAS_CONFIG_PATH')
+    if conf_path == None:
+        log("No alias config path set in profile.d ... Defaulting to /etc")
+        conf_path = "/etc"
+    dev_path = os.getenv('ALIAS_DEVICE_PATH')
+    if dev_path == None:   
+        log("No device path set in profile.d ... Defaulting to /etc")
+        dev_path = "/dev"
+    
+    return conf_path, dev_path
+    
+    
+##################################################################################################################################################################################
+#   getHba(hbas)
+# ARGS: hbas ( a list of numbers which identify "plugged in" hba cards listed by the lspci command )
+# DESC: get the number of HBA cards that are "plugged in". The card numbers are "hardwritten" in the main function and passed to getHba(hbas) as a list.
+##################################################################################################################################################################################
+def getHba(hbas):
     hbaCards = []
-    allPcis = subprocess.Popen(["lspci"], universal_newlines=True, stdout=subprocess.PIPE).stdout
-    for line in allPcis:
+    allPcis = subprocess.Popen(["lspci"], universal_newlines = True, stdout = subprocess.PIPE).stdout
+    for line in allPcis:                                    
         for card in hbas:
-            regex = re.search("({c})".format(c=card), line)
+            regex = re.search("({c})".format(c = card), line)
             if regex != None:
                 hbaCards.append(regex.group(0))
                 
     return hbaCards
     
+    
+##################################################################################################################################################################################
+#   getChassis(hbaCards)
+# ARGS: hbaCards ( a list of hba cards found )
+# DESC: get the size of the chassis, based on the quantity of HBA cards. This will work if the chassis is not a 
+#   hybrid chassis, because it effectively multiplies the number of HBA cards by 15. Returns the chassis size.
+#   takes the list of hba cards as an argument
+##################################################################################################################################################################################
 def getChassis(hbaCards):
     hbaQuantity = len(hbaCards)
     if hbaQuantity == 0:
@@ -42,41 +92,167 @@ def getChassis(hbaCards):
             chassisSize = "No Supported HBA Detected"
     return chassisSize
     
+    
+##################################################################################################################################################################################
+#   hybridChassisCheck()
+# ARGS: none
+# DESC: Check if the machine has a hybrid chassis (has some 24i slots) or not. Returns a boolean which is True if there is a 24i slot and false otherwise
+##################################################################################################################################################################################  
+def hybridChassisCheck():
+    a = None
+    hybridChassis = 0
+    
+    a = subprocess.Popen(["/opt/tools/storcli64", "show", "all"], stdout = subprocess.PIPE, universal_newlines = True).stdout
+    for line in a:
+        b = re.search( "24i", line) 
+        if b != None:
+            hybridChassis += 1
+    if hybridChassis > 0:
+        return True
+    else:
+        return False
+        
+        
+##################################################################################################################################################################################
+#   checkCas()
+# ARGS: none
+# DESC: finds out if the machine is running open-cas-linux and returns a boolean which is True if open-cas-linux is being run and false otherwise
+##################################################################################################################################################################################              
 def checkCas():
-    if subprocess.run(["rpm", "-q", "open-cas-linux"], stdout=subprocess.PIPE, universal_newlines=True).returncode == 0:
-        if subprocess.run(["casadm", "-L"], stdout=subprocess.PIPE, universal_newlines=True).stdout == "No chaches running":
-            CAS=False
+    if subprocess.run(["rpm", "-q", "open-cas-linux"], stdout = subprocess.PIPE, universal_newlines = True).returncode == 0:
+        if subprocess.run(["casadm", "-L"], stdout = subprocess.PIPE, universal_newlines = True).stdout == "No chaches running":
+            CAS = False
         else:
             CAS = True
     else:
-        CAS=False
+        CAS = False
+        
     return CAS
     
-def getDrives(CAS):
-    theBays=[]
-     bays=subprocess.Popen(["cat", "/etc/vdev_id.conf"], stdout=subprocess.PIPE, universal_newlines=True).stdout
-     for line in bays:
-        regex = re.search("^alias\s(\S+)\s", line)
-        if regex != None:
-            bay = re.search("\s(\S)\s", regex)
-            if bay != None:
-                print(bay.group(0))
-                if CAS == True:
-                    bayPath = DEVICE_PATH+"/"+bay
-                    var1 = subprocess.Popen(["casadm", "-L", "-o", "csv"], stdout=subprocess.PIPE, universal_newlines=True).stdout
-                    var2 = subprocess.run(["readlink", bayPath], stdout=subprocess.PIPE, universal_newlines=True).stdout
-                    casType = subprocess.Popen(["cut", "-d", "-f", "1"], stdout=subprocess.PIPE, universal_newlines=True).stdout
-                    if casType == "core":
-                        theBay.append(
     
-def main():
-    hbaCards=getHba()
-    chassisSize=getChassis(hbaCards)
-    CAS=checkCas()
-    getDrives()
-    print(CAS)
-    print(hbaCards)
-    print(chassisSize)
 
+##################################################################################################################################################################################
+#   getSymLinkAndDevice()
+# ARGS: none
+# DESC: gets the device name and the symbolic link that points to it. Returns a list containing tuples. Each tuple has a symbolic link and the device (file) that it points to.
+##################################################################################################################################################################################
+def getSymLinkAndDevice(DEVICE_PATH):
+    SymLinkAndDevice = []
+    allBays=subprocess.Popen(["cat", "/etc/vdev_id.conf"], stdout = subprocess.PIPE, universal_newlines = True).stdout
+    for line in allBays:
+        regex = re.search("^alias\s(\S+)\s", line)                                                              
+        if regex != None:
+            bay = regex.group(1)
+            if subprocess.run(["ls", DEVICE_PATH+"/"+bay],stderr = subprocess.PIPE, stdout = subprocess.PIPE, universal_newlines = True).returncode == 0:
+            # if there is a symbolic link in the specified path, check what device it points to. Append the symbolic link and the device to a list.
+                symLinkDestination = subprocess.run(["readlink", DEVICE_PATH+"/"+bay], stdout=subprocess.PIPE, universal_newlines=True).stdout
+                symLinkDestination = symLinkDestination.strip()
+                SymLinkAndDevice.append((bay, symLinkDestination))
+    return SymLinkAndDevice
+    
+ 
+
+##################################################################################################################################################################################
+#       getCores()
+# ARGS: none
+# DESC: gets the device name for all the cores and all the caches. Returns a list containing tuples. Each tuple has a device name and the name of the core.
+#   And when I say name here I mean "cas1-1" for example.
+##################################################################################################################################################################################
+def getCores():
+    cores = []
+    casadmList = subprocess.Popen(["casadm", "-L", "-o", "csv"], stdout=subprocess.PIPE, universal_newlines=True).stdout
+    for line in casadmList:
+        core = re.search("^core,.*,/dev/([A-Za-z]+).*,.*,.*,/dev/(cas.*)$", line)
+        if core != None:
+            cores.append((core.group(1), core.group(2)))
+    return cores
+    
+
+##################################################################################################################################################################################
+#    getCaches()
+# ARGS: none
+# DESC: gets the device name for  all the caches. Returns a list containing strings. Each string is a device name.
+##################################################################################################################################################################################
+def getCaches():
+    caches = []
+    casadmList = subprocess.Popen(["casadm", "-L", "-o", "csv"], stdout=subprocess.PIPE, universal_newlines=True).stdout
+    for line in casadmList:
+        cache = re.search("^cache,.*,/dev/([A-Za-z]+).*,.*$", line)
+        if cache != None:
+            caches.append(cache.group(1))
+    return caches
+
+
+##################################################################################################################################################################################
+#   crossRef(SLD, caches, cores, CAS)
+# ARGS: SLD ( a list of tuples containing all symbolic links to devices and the device that they point to ) 
+#       caches ( a list of all the devices that are running caches
+#       cores ( a list of all the devices that are running cores and the name (eg cas1-1) of the core )
+#       CAS ( a boolean which is true if there is open-cas-linux on the machine and false otherwise )
+# DESC: returns a list of all devices that are not caches and specifies what devices are cores
+#   cross reference the three lists returned by getSymLinkAndDevice, getCaches and getCores. Check all device names in getSymLinkAndDevice for if they are cores or not.
+#   If there is no open-cas-linux running on the machine, simply copy the list from getDeviceAndCoreName
+#   If there is a match for a device name and a core, append that device to a list. 
+#   If there is a match for a device name and a cache, do not append it to the list.
+#   If there is no match for a core nor a cache, append the device and the symbolic link to it to the list.
+################################################################################################################################################################################## 
+def crossRef(SLD, caches, cores, CAS):
+    BAYS=[]
+    if CAS == True:
+        for SLandDEV in SLD:
+            isCache = False
+            isCore = False
+            for DEVandNAME in cores:
+                if SLandDEV[1] == DEVandNAME[0]:
+                    BAYS.append((DEVandNAME[1], SLandDEV[1]))
+                    isCore = True
+            for CACHE in caches:
+                if SLandDEV[1] == CACHE:
+                    isCache = True   
+            if isCore == False and isCache == False:
+                BAYS.append(SLandDEV)
+        
+    else:
+        BAYS = SLD.copy()
+    return(BAYS)
+    
+ 
+##################################################################################################################################################################################
+#   displayVars()
+# ARGS: none
+# DESC: Displays the variables that have been grouped by all other functions 
+##################################################################################################################################################################################
+def displayVars(hbaCards, chassisSize, hybridChassis, BAYS, DEVICE_PATH):
+    print("---")
+    print("chassis_size: {chassis}".format(chassis = chassisSize))
+    print("hybrid_chassis: {hchassis}".format(hchassis = hybridChassis))
+    print("osd_auto_discovery: false")
+    print("lvm_volumes:")
+    for aliasAndSymLink in BAYS:
+        print(" - data: {DP}/{ALIAS}".format(DP = DEVICE_PATH, ALIAS = aliasAndSymLink[0]))
+    print('\n')
+    print("devices:")
+    for aliasAndSymLink in BAYS:
+        if aliasAndSymLink[0][0:3] == "cas":
+            print(" - {DP}/{SYMLINK}".format(DP = DEVICE_PATH, SYMLINK = aliasAndSymLink[0]))
+        else:
+            print(" - {DP}/{SYMLINK}".format(DP = DEVICE_PATH, SYMLINK = aliasAndSymLink[1]))
+    print('\n')
+    	
+def main():
+    hbas = [ "3224", "3316", "3616", "3008"]
+    pathVariables = get_path_variables()
+    DEVICE_PATH = pathVariables[1]
+    CONFIG_PATH = pathVariables[0]
+    hbaCards = getHba(hbas)
+    chassisSize = getChassis(hbaCards)
+    hybridChassis = hybridChassisCheck()
+    CAS = checkCas()
+    SLD = getSymLinkAndDevice(DEVICE_PATH)
+    caches = getCaches()
+    cores = getCores()
+    BAYS = crossRef(SLD, caches, cores, CAS)
+    displayVars(hbaCards, chassisSize, hybridChassis, BAYS, DEVICE_PATH)
+  
 if __name__ == "__main__":
     main() 
