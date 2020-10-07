@@ -206,7 +206,6 @@ def crossRef(SLD, caches, cores, CAS):
         for SLandDEV in SLD:
             isCache = False
             isCore = False
-            isBad = False
             for DEVandNAME in cores:
                 if SLandDEV[1] == DEVandNAME[0]:
                     BAYS.append((DEVandNAME[1], SLandDEV[1]))
@@ -214,7 +213,7 @@ def crossRef(SLD, caches, cores, CAS):
             for CACHE in caches:
                 if SLandDEV[1] == CACHE:
                     isCache = True
-            if (isCore == False and isCache == False and isBad == False):
+            if (isCore == False and isCache == False):
                     BAYS.append(SLandDEV)
         
     else:
