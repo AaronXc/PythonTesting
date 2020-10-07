@@ -22,6 +22,9 @@ logic for generate-osd-vars:
 	3c) clear all flags that were set. BREAK 3a[OUTER_LOOP].
 	
 4) return LIST_D
+
+5) check if any of the devices entered on the command line were also in list_D, and remove them if they are
+6) display results in yaml
 """
 
 ###################################################################################################################################################################################
@@ -29,6 +32,7 @@ logic for generate-osd-vars:
 import subprocess
 import re
 import os
+from optparse import OptionParser
 
 ###################################################################################################################################################################################
 #   get_path_variables()
@@ -202,19 +206,39 @@ def crossRef(SLD, caches, cores, CAS):
         for SLandDEV in SLD:
             isCache = False
             isCore = False
+            isBad = False
             for DEVandNAME in cores:
                 if SLandDEV[1] == DEVandNAME[0]:
                     BAYS.append((DEVandNAME[1], SLandDEV[1]))
                     isCore = True
             for CACHE in caches:
                 if SLandDEV[1] == CACHE:
-                    isCache = True   
-            if isCore == False and isCache == False:
-                BAYS.append(SLandDEV)
+                    isCache = True
+            if (isCore == False and isCache == False and isBad == False):
+                    BAYS.append(SLandDEV)
         
     else:
         BAYS = SLD.copy()
     return(BAYS)
+  
+
+##################################################################################################################################################################################  
+#   removeBadDrives(BAYS, badDrives)
+# ARGS: BAYS ( a list of the symbolic links and the devices that they point to, or in the case of a core for machines running open-cas-linux, the device name and the core name) 
+#    badDrives ( a list of symbolic links/the BAY alias provided by the person running generate-osd-vars )
+# DESC: compare the entries in the BAYS and badDrives lists and remove any badDrives from BAYS
+##################################################################################################################################################################################    
+def removeBadDrives(BAYS, badDrives):
+    for BAY in BAYS:
+        for badDrive in badDrives:
+            if badDrive == BAY[0]:
+                BAYS.remove(BAY)
+                BAYS.insert(0, None)
+                
+    while BAYS[BAYS.count(None)-1] == None:
+        BAYS.pop(BAYS.count(None)-1)
+        
+    return BAYS
     
  
 ##################################################################################################################################################################################
@@ -240,6 +264,15 @@ def displayVars(hbaCards, chassisSize, hybridChassis, BAYS, DEVICE_PATH):
     print('\n')
     	
 def main():
+    #parse the command line for options and arguments. the only option is the -e one right now. the argument is a string of drives to exclude in the listing.
+    badDrives = []
+    parser = OptionParser()
+    parser.add_option("-e", "--exclude-by-drive-alias",action="store", type=str, dest="drive_alias", nargs=1, default=None, help=" -e: only show the drives that have not been  listed as arguments")    
+    (options, args) = parser.parse_args()
+    
+    if options.drive_alias != None:
+        badDrives = options.drive_alias.split()
+        
     hbas = [ "3224", "3316", "3616", "3008"]
     pathVariables = get_path_variables()
     DEVICE_PATH = pathVariables[1]
@@ -252,6 +285,7 @@ def main():
     caches = getCaches()
     cores = getCores()
     BAYS = crossRef(SLD, caches, cores, CAS)
+    removeBadDrives(BAYS, badDrives)
     displayVars(hbaCards, chassisSize, hybridChassis, BAYS, DEVICE_PATH)
   
 if __name__ == "__main__":
